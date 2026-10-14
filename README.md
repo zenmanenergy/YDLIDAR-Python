@@ -8,7 +8,7 @@ The GS2 is a solid-state line lidar: 100° field of view, out to about 300 mm, r
   GS2 ──USB──┐                                   ┌──> /lidar/frontDistance
   GS2 ──USB──┤  Orange Pi                        │    /lidar/wall/...
   camera ────┤   ├─ PhotonVision ──┐             │    /lidar/merged/points
-  camera ────┘   └─ lidar.py ──────┴─ Ethernet ──┴──> roboRIO (LidarSubsystem, commands)
+  camera ────┘   └─ lidar.py ──────┴─ Ethernet ──┴──> roboRIO (robot code)
 ```
 
 PhotonVision and `lidar.py` are separate programs. They never talk to each other; both publish to NetworkTables, and the robot code combines them.
@@ -26,17 +26,12 @@ orangepi/
   deploy.sh         installs everything on the Orange Pi
   tools/fake_gs2.py simulated GS2 for testing without hardware
   tests/            automated tests (run against simulated lidars)
-roborio/                              complete RobotPy (Python) robot project
-  robot.py                            entry point
-  robotcontainer.py                   creates subsystems, binds buttons
-  pyproject.toml                      RobotPy version and packages
-  subsystems/lidar_subsystem.py
-  subsystems/example_drivetrain.py    placeholder: replace with your drivetrain
-  commands/drive_to_wall_distance.py
-  commands/square_to_wall.py
-  commands/lidar_intake_assist.py     PhotonVision + lidar handoff
-  tests/pyfrc_test.py                 RobotPy's standard startup tests
-roborio_tests/                        logic tests with a simulated robot (run without RobotPy)
+roborio/examples/                     RobotPy (Python) robot examples, one robot.py each
+  read_lidar/                         start here: shows lidar values, doesn't move
+  drive_to_wall_distance/             hold A: drive to a set gap from the wall
+  square_to_wall/                     hold A: turn until square to the wall
+  lidar_intake_assist/                hold A: camera far away, lidar up close
+roborio_tests/                        logic tests for the examples (run without RobotPy)
 ```
 
 ## Hardware
@@ -74,7 +69,7 @@ You'll see one entry per lidar, named after the physical USB port. Unplug one to
 **3. Install:**
 
 ```bash
-sudo ./deploy.sh
+sudo bash deploy.sh
 ```
 
 This copies the code to `/opt/lidar`, installs Python packages into `/opt/lidar/venv`, installs and starts the `lidar` service, and checks the config (it warns if the team number is unset or a port is missing).
@@ -87,7 +82,7 @@ journalctl -u lidar -f
 
 You should see `scanning, 1 unit(s) on this port` for each lidar.
 
-Running `sudo ./deploy.sh` again updates the code but keeps the installed `config.json`. Use `sudo ./deploy.sh --replace-config` to overwrite it with the repo's copy.
+Running `sudo bash deploy.sh` again updates the code but keeps the installed `config.json`. Use `sudo bash deploy.sh --replace-config` to overwrite it with the repo's copy.
 
 ### After reflashing PhotonVision
 
@@ -186,84 +181,62 @@ Everything is under `/lidar`. Distances in meters, angles in degrees.
 | `<name>/status` | string | `ok`, or the last error |
 | `<name>/checksumErrors` | int | Corrupted packets so far. Climbing steadily means a bad cable or USB problem |
 
-## Robot code
+## Robot code examples
 
-The `roborio` folder is a complete RobotPy 2026 project (Python, commands2, photonlibpy) that deploys as-is. It uses a placeholder drivetrain that doesn't move any motors: it shows the speeds the commands request on the SmartDashboard (`Drive/RequestedVx`, `Drive/RequestedOmega`). That lets you bench-test the whole lidar pipeline on a real roboRIO before touching your drive code.
+Each folder in `roborio/examples` is a complete robot program for RobotPy 2026, with all its code in one `robot.py` that reads top to bottom. They use a plain `TimedRobot` and an Xbox controller, nothing else. Start with `read_lidar`.
 
-**Deploy it** (from the `roborio` folder, with RobotPy 2026 installed on your laptop):
+| Example | What it does |
+|---|---|
+| `read_lidar` | Shows the lidar values on the SmartDashboard. Doesn't move. Use it to check everything is connected |
+| `drive_to_wall_distance` | Hold A: drives forward or backward until the front bumper is 50 mm from the wall |
+| `square_to_wall` | Hold A: turns in place until the robot faces the wall squarely |
+| `lidar_intake_assist` | Hold A: steers to a game piece with the PhotonVision camera, then finishes the approach with the lidar |
+
+In every example, letting go of A stops the robot.
+
+**They don't move motors yet.** Each driving example has a `drive(forward, left, turn)` method at the bottom that only shows the speeds it wants on the SmartDashboard (`Drive/Forward`, `Drive/Left`, `Drive/Turn`). That makes them safe to try on a robot on blocks. To drive for real, replace the inside of `drive()` with a call to your drivetrain. The comment in each file shows how.
+
+Each example folder contains:
+
+- `robot.py`: all the code
+- `pyproject.toml`: which RobotPy version and packages to install
+- `tests/pyfrc_test.py`: one line that runs RobotPy's standard startup test. `robotpy deploy` runs it before deploying and won't deploy without it. You don't need to read it.
+
+**Run an example** (with RobotPy 2026 installed on your laptop):
 
 ```bash
-robotpy sync      # once, with internet: downloads RobotPy, commands2, photonlibpy
-robotpy deploy    # connected to the robot
+cd roborio/examples/read_lidar
+robotpy sync      # once, with internet: downloads RobotPy and packages
+robotpy sim       # try it in the simulator on your laptop
+robotpy deploy    # or send it to the robot
 ```
 
-`robotpy deploy` first runs the tests in `roborio/tests` (RobotPy's standard tests, which start the robot in the simulator and run every mode) and won't deploy if they fail.
+For `lidar_intake_assist`, set the camera's name and mounting position at the top of `robot.py`, and keep `photonlibpy` in its `pyproject.toml` at the same version as PhotonVision on the Orange Pi (shown in its web dashboard).
 
-**Buttons** (Xbox controller, port 0):
+Every example checks that the lidar data is fresh before using it: the Orange Pi increases `heartbeat` every update, and if it stops changing, the examples treat the lidar as missing and stop instead of acting on an old number.
 
-- **A** (press): square up to the wall ahead, then drive to 50 mm from it
-- **B** (hold): drive to a game piece, camera far away, lidar up close
+The tuning numbers (speeds and gains) at the top of each `robot.py` are starting points. Tune them on the robot, slowly.
 
-**Use your real drivetrain:** in `robotcontainer.py`, replace `ExampleDrivetrain()` with your drivetrain subsystem. It needs two methods:
+### Tests
 
-- `driveRobotRelative(speeds)`: takes `ChassisSpeeds` (forward, left, turn), robot-relative. Swerve drivetrains usually have this already. For tank, convert with `DifferentialDriveKinematics.toWheelSpeeds(speeds)`.
-- `getPose()`: returns the robot's field `Pose2d`.
-
-Or copy `subsystems/lidar_subsystem.py` and the `commands` folder into your existing robot project, and add the bindings from `robotcontainer.py`. Your `pyproject.toml` needs:
-
-```toml
-[tool.robotpy]
-components = ["commands2"]
-requires = ["photonlibpy==2026.3.4"]
+```bash
+python3 -m unittest discover roborio_tests -v
 ```
 
-Keep photonlibpy at the same version as PhotonVision on the Orange Pi (shown in its web dashboard), or it warns at startup.
+These run on any computer, without RobotPy. `roborio_tests/fakes` holds small stand-ins for wpilib, ntcore and photonlibpy that use the same names as RobotPy 2026. Each test loads an example's `robot.py`, connects its `drive()` to a simulated robot, and runs it like the real 20 ms robot loop: driving to a wall gap (forward and backward), squaring up from either side, stopping when A is released or the lidar goes quiet, and the full intake approach where the camera loses the piece near the bumper and the lidar finishes the job. They live outside `roborio` so their stand-ins never conflict with the real RobotPy.
 
-Settings at the top of `robotcontainer.py`: the PhotonVision camera name, where the intake camera is mounted, the wall gap, and the intake stopping distance.
-
-`LidarSubsystem` methods. Anything that can be missing returns `None`:
-
-| Method | Returns |
-|---|---|
-| `isConnected()` | Fresh data is arriving |
-| `getFrontDistance()` | Bumper to closest point ahead, meters, or `None` |
-| `getWall()` | `Wall` with `.distance` (meters) and `.angle` (`Rotation2d`), or `None` |
-| `getPoints()` | All points, robot frame, list of `Translation2d` |
-| `getDistanceAlongRay(origin, direction, half_width)` | Distance to the closest point near a ray from any spot on the robot |
-| `getClosestPointAlongRay(...)` | The point itself |
-| `getDistanceAtBearing(bearing, half_width)` | Ray from robot center |
-| `getPointsTimestamp()` | FPGA time the points were measured, for latency compensation |
-
-The module also has `to_field(points, pose)` for converting robot-frame points to field coordinates.
-
-Every getter returns `None` (or an empty list) when the data is stale, so a crashed script or unplugged lidar reads as "no data", never an old number. Always check for `None` before using a value. The SmartDashboard shows `Lidar/Connected`, `Lidar/FrontDistance`, and `Lidar/PointCount`.
-
-The tuning constants (speeds and gains) at the top of each command file are starting points. Tune them on the robot, slowly.
-
-### Robot code tests
-
-Two sets of tests:
-
-- **`roborio/tests`**: RobotPy's standard tests. Run `robotpy test` in the `roborio` folder (needs RobotPy installed). They start the robot in the simulator and run disabled, autonomous, and teleop to catch crashes.
-- **`roborio_tests`**: lidar logic tests that run on any computer, without RobotPy:
-  ```bash
-  python3 -m unittest discover roborio_tests -v
-  ```
-  `roborio_tests/fakes` holds small stand-ins for wpilib, ntcore, commands2, wpimath and photonlibpy that use the same names as RobotPy 2026. The tests simulate a robot driving each command to completion: squaring up from either side, driving to a wall distance (forward and backward), stopping when the lidar is lost, and the full intake approach where the camera loses the piece near the bumper and the lidar finishes the job. They also build the robot from `robot.py` and check the button bindings. They live outside `roborio` so their stand-ins never conflict with the real RobotPy during `robotpy deploy`.
-
-These check the logic, not your drivetrain. Still test on the real robot, on blocks or at low speed first.
+They check the logic, not your drivetrain. Still test on the real robot, on blocks or at low speed first.
 
 ## Combining with PhotonVision
 
 The two sensors are good at opposite ranges. PhotonVision works from across the field but its distance estimates get noisy up close. The lidar is blind past about 300 mm but precise to a few millimeters inside that.
 
-- **Game piece intake** (`LidarIntakeAssist`): the camera gives the direction to the piece. The command looks for lidar points along that same line from the camera's position. Once the lidar sees the piece, its distance drives the final approach, and the command keeps going on the lidar alone if the camera loses the piece right at the bumper.
-- **Scoring alignment:** drive to the scoring location with your AprilTag pose estimate, then finish with `SquareToWall` and `DriveToWallDistance`. The pose estimate gets you close; the lidar gets you exact.
-- **Field-frame points:** construct `LidarSubsystem` with a pose supplier (`LidarSubsystem(self.drivetrain.getPose)`) and it publishes the points in field coordinates to `/Lidar/FieldPoints`, which is useful for checking that what the lidar sees lines up with the field.
+- **Game piece intake** (`lidar_intake_assist`): the camera gives the direction to the piece. The robot looks for lidar points along that same line from the camera's position. Once the lidar sees the piece, its distance drives the final approach, and it keeps going on the lidar alone if the camera loses the piece right at the bumper.
+- **Scoring alignment:** drive to the scoring location with your AprilTag pose estimate, then finish with the logic from `square_to_wall` and `drive_to_wall_distance`. The pose estimate gets you close; the lidar gets you exact.
 
 ## Viewing in AdvantageScope
 
-Connect AdvantageScope to the robot, open a 2D Field tab, and drag `/Lidar/FieldPoints` onto it to see the points on the field around the robot. `/lidar/merged/translations` contains the robot-relative points.
+Connect AdvantageScope to the robot and look under `/lidar` for every value in the table above. `/lidar/merged/translations` holds the points as robot-relative positions, which AdvantageScope can draw in a 2D field view (attached to the robot's pose).
 
 ## Troubleshooting
 

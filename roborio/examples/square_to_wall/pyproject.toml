@@ -1,0 +1,15 @@
+#
+# RobotPy settings for this example. "robotpy sync" downloads what's listed here,
+# and "robotpy deploy" installs it on the roboRIO.
+#
+
+[tool.robotpy]
+
+# Version of RobotPy this example uses
+robotpy_version = "2026.2.2"
+
+# Optional RobotPy components (none needed for this example)
+components = []
+
+# Other packages (none needed for this example)
+requires = []

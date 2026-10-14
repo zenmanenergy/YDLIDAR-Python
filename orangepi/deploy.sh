@@ -3,8 +3,8 @@
 # Installs the lidar service on the Orange Pi (or any Debian/Ubuntu machine).
 # Run from this folder after cloning the repo:
 #
-#     sudo ./deploy.sh                    install or update code, keep existing config
-#     sudo ./deploy.sh --replace-config   also overwrite /opt/lidar/config.json with this folder's copy
+#     sudo bash deploy.sh                    install or update code, keep existing config
+#     sudo bash deploy.sh --replace-config   also overwrite /opt/lidar/config.json with this folder's copy
 #
 # Needs internet the first time (apt and pip). Safe to run again any time.
 
@@ -23,7 +23,7 @@ for arg in "$@"; do
 done
 
 if [[ $EUID -ne 0 ]]; then
-    echo "Run with sudo: sudo ./deploy.sh"
+    echo "Run with sudo: sudo bash deploy.sh"
     exit 1
 fi
 
