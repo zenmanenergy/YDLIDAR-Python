@@ -26,11 +26,12 @@ orangepi/
   deploy.sh         installs everything on the Orange Pi
   tools/fake_gs2.py simulated GS2 for testing without hardware
   tests/            automated tests (run against simulated lidars)
-roborio/src/main/java/frc/robot/
-  subsystems/LidarSubsystem.java
-  commands/DriveToWallDistance.java
-  commands/SquareToWall.java
-  commands/LidarIntakeAssist.java   PhotonVision + lidar handoff
+roborio/                              RobotPy (Python) robot code
+  subsystems/lidar_subsystem.py
+  commands/drive_to_wall_distance.py
+  commands/square_to_wall.py
+  commands/lidar_intake_assist.py     PhotonVision + lidar handoff
+  tests/                              simulated-robot tests
 ```
 
 ## Hardware
@@ -182,52 +183,85 @@ Everything is under `/lidar`. Distances in meters, angles in degrees.
 
 ## Robot code
 
-Written for Java, command-based, WPILib 2026, and PhotonLib 2026. Copy `roborio/src/main/java/frc/robot/subsystems/LidarSubsystem.java` and the `commands` folder into your robot project.
+Written for RobotPy 2026 (Python) with commands2 and photonlibpy. Copy the `subsystems` and `commands` folders from `roborio/` into your robot project, next to `robot.py`. In `pyproject.toml`, make sure the commands2 and PhotonVision packages are installed on the robot:
 
-The commands take a robot-relative drive function instead of a specific drivetrain class, so they work with swerve, tank, or mecanum. In `RobotContainer`:
-
-```java
-private final LidarSubsystem lidar = new LidarSubsystem(drivetrain::getPose);
-
-// Robot-relative drive. For swerve this is usually drivetrain.driveRobotRelative(speeds).
-// For tank, convert with DifferentialDriveKinematics.toWheelSpeeds(speeds).
-Consumer<ChassisSpeeds> drive = drivetrain::driveRobotRelative;
-
-private final PhotonCamera intakeCamera = new PhotonCamera("intake");
-// Camera 0.30 m forward of robot center, on the centerline, facing forward
-private final Transform2d robotToIntakeCamera = new Transform2d(0.30, 0.0, Rotation2d.kZero);
-
-private void configureBindings() {
-  // Square up, then drive to 50 mm from the wall
-  controller.a().onTrue(
-      new SquareToWall(lidar, drivetrain, drive)
-          .andThen(new DriveToWallDistance(lidar, drivetrain, drive, 0.05)));
-
-  // Drive to a game piece: camera far away, lidar up close
-  controller.b().whileTrue(
-      new LidarIntakeAssist(lidar, intakeCamera, robotToIntakeCamera, drivetrain, drive, 0.10));
-}
+```toml
+[tool.robotpy]
+robotpy_extras = ["commands2"]
+requires = ["photonlibpy"]
 ```
 
-`LidarSubsystem` methods:
+The commands take a robot-relative drive function instead of a specific drivetrain class, so they work with swerve, tank, or mecanum. In `robotcontainer.py`:
+
+```python
+from photonlibpy import PhotonCamera
+from wpimath.geometry import Rotation2d, Transform2d, Translation2d
+
+from commands.drive_to_wall_distance import DriveToWallDistance
+from commands.lidar_intake_assist import LidarIntakeAssist
+from commands.square_to_wall import SquareToWall
+from subsystems.lidar_subsystem import LidarSubsystem
+
+
+class RobotContainer:
+    def __init__(self):
+        self.drivetrain = ...  # your drivetrain subsystem
+        self.lidar = LidarSubsystem(self.drivetrain.getPose)
+
+        # Robot-relative drive. For swerve this is usually drivetrain.driveRobotRelative(speeds).
+        # For tank, convert with DifferentialDriveKinematics.toWheelSpeeds(speeds).
+        self.drive = self.drivetrain.driveRobotRelative
+
+        self.intake_camera = PhotonCamera("intake")
+        # Camera 0.30 m forward of robot center, on the centerline, facing forward
+        self.robot_to_intake_camera = Transform2d(Translation2d(0.30, 0.0), Rotation2d(0))
+
+        self.configureButtonBindings()
+
+    def configureButtonBindings(self):
+        # Square up, then drive to 50 mm from the wall
+        self.controller.a().onTrue(
+            SquareToWall(self.lidar, self.drivetrain, self.drive).andThen(
+                DriveToWallDistance(self.lidar, self.drivetrain, self.drive, 0.05)
+            )
+        )
+
+        # Drive to a game piece: camera far away, lidar up close
+        self.controller.b().whileTrue(
+            LidarIntakeAssist(
+                self.lidar, self.intake_camera, self.robot_to_intake_camera,
+                self.drivetrain, self.drive, 0.10,
+            )
+        )
+```
+
+`LidarSubsystem` methods. Anything that can be missing returns `None`:
 
 | Method | Returns |
 |---|---|
 | `isConnected()` | Fresh data is arriving |
-| `getFrontDistance()` | `OptionalDouble`, bumper to closest point ahead |
-| `getWall()` | `Optional<Wall>` with `distanceMeters()` and `angle()` |
-| `getPoints()` | All points, robot frame, `List<Translation2d>` |
-| `getDistanceAlongRay(origin, direction, halfWidth)` | Distance to the closest point near a ray from any spot on the robot |
+| `getFrontDistance()` | Bumper to closest point ahead, meters, or `None` |
+| `getWall()` | `Wall` with `.distance` (meters) and `.angle` (`Rotation2d`), or `None` |
+| `getPoints()` | All points, robot frame, list of `Translation2d` |
+| `getDistanceAlongRay(origin, direction, half_width)` | Distance to the closest point near a ray from any spot on the robot |
 | `getClosestPointAlongRay(...)` | The point itself |
-| `getDistanceAtBearing(bearing, halfWidth)` | Ray from robot center |
+| `getDistanceAtBearing(bearing, half_width)` | Ray from robot center |
 | `getPointsTimestamp()` | FPGA time the points were measured, for latency compensation |
-| `toField(points, pose)` | Robot-frame points to field coordinates |
 
-Every getter returns empty when the data is stale, so a crashed script or unplugged lidar reads as "no data", never an old number. The SmartDashboard shows `Lidar/Connected`, `Lidar/FrontDistance`, and `Lidar/PointCount`.
+The module also has `to_field(points, pose)` for converting robot-frame points to field coordinates.
 
-The tuning constants (speeds and gains) at the top of each command are starting points. Tune them on the robot, slowly.
+Every getter returns `None` (or an empty list) when the data is stale, so a crashed script or unplugged lidar reads as "no data", never an old number. Always check for `None` before using a value. The SmartDashboard shows `Lidar/Connected`, `Lidar/FrontDistance`, and `Lidar/PointCount`.
 
-When the team moves to WPILib 2027, expect to update imports and some API names; the Python side already handles the NetworkTables change.
+The tuning constants (speeds and gains) at the top of each command file are starting points. Tune them on the robot, slowly.
+
+### Robot code tests
+
+```bash
+cd roborio
+python3 -m unittest discover tests -v
+```
+
+These run on any computer, without RobotPy installed. `tests/fakes` holds small stand-ins for wpilib, ntcore, commands2 and wpimath that use the same names as RobotPy 2026. The tests simulate a robot driving each command to completion: squaring up from either side, driving to a wall distance (forward and backward), stopping when the lidar is lost, and the full intake approach where the camera loses the piece near the bumper and the lidar finishes the job. They check the logic, not RobotPy itself, so still test on the real robot.
 
 ## Combining with PhotonVision
 
@@ -235,7 +269,7 @@ The two sensors are good at opposite ranges. PhotonVision works from across the 
 
 - **Game piece intake** (`LidarIntakeAssist`): the camera gives the direction to the piece. The command looks for lidar points along that same line from the camera's position. Once the lidar sees the piece, its distance drives the final approach, and the command keeps going on the lidar alone if the camera loses the piece right at the bumper.
 - **Scoring alignment:** drive to the scoring location with your AprilTag pose estimate, then finish with `SquareToWall` and `DriveToWallDistance`. The pose estimate gets you close; the lidar gets you exact.
-- **Field-frame points:** construct `LidarSubsystem` with a pose supplier (`new LidarSubsystem(drivetrain::getPose)`) and it publishes the points in field coordinates to `/Lidar/FieldPoints`, which is useful for checking that what the lidar sees lines up with the field.
+- **Field-frame points:** construct `LidarSubsystem` with a pose supplier (`LidarSubsystem(self.drivetrain.getPose)`) and it publishes the points in field coordinates to `/Lidar/FieldPoints`, which is useful for checking that what the lidar sees lines up with the field.
 
 ## Viewing in AdvantageScope
 
