@@ -1,0 +1,32 @@
+{
+  "team": 0,
+  "server": "",
+  "publish_hz": 50,
+  "stale_s": 0.25,
+  "robot": {
+    "length_m": 0.84,
+    "width_m": 0.84
+  },
+  "lidars": [
+    {
+      "name": "frontLeft",
+      "port": "/dev/serial/by-path/REPLACE-WITH-LEFT-PORT",
+      "module": 0,
+      "x_m": 0.38,
+      "y_m": 0.38,
+      "yaw_deg": 15,
+      "flip": false,
+      "enabled": true
+    },
+    {
+      "name": "frontRight",
+      "port": "/dev/serial/by-path/REPLACE-WITH-RIGHT-PORT",
+      "module": 0,
+      "x_m": 0.38,
+      "y_m": -0.38,
+      "yaw_deg": -15,
+      "flip": false,
+      "enabled": true
+    }
+  ]
+}

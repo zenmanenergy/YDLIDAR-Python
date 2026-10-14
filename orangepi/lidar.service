@@ -1,0 +1,17 @@
+[Unit]
+Description=GS2 lidar reader (publishes to NetworkTables /lidar)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/lidar
+ExecStart=/opt/lidar/venv/bin/python -u /opt/lidar/lidar.py --config /opt/lidar/config.json
+Restart=always
+RestartSec=2
+# Run a little below PhotonVision so vision always gets the CPU first
+Nice=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

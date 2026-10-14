@@ -1,0 +1,5 @@
+pyserial>=3.5
+pyntcore
+# Optional: lets lidar.py publish Translation2d[] structs that AdvantageScope
+# can draw on its 2D field. lidar.py works without it.
+robotpy-wpimath
