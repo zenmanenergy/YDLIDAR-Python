@@ -1,0 +1,16 @@
+#
+# RobotPy project settings. "robotpy sync" installs these on your computer and
+# downloads them for the roboRIO; "robotpy deploy" then installs them on the robot.
+#
+
+[tool.robotpy]
+
+# Version of RobotPy this project uses
+robotpy_version = "2026.2.2"
+
+# Optional RobotPy components
+components = ["commands2"]
+
+# Other packages. Keep photonlibpy at the same version as PhotonVision on the
+# Orange Pi (shown in the PhotonVision web dashboard), or it will warn at startup.
+requires = ["photonlibpy==2026.3.4"]

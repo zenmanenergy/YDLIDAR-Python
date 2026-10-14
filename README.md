@@ -26,12 +26,17 @@ orangepi/
   deploy.sh         installs everything on the Orange Pi
   tools/fake_gs2.py simulated GS2 for testing without hardware
   tests/            automated tests (run against simulated lidars)
-roborio/                              RobotPy (Python) robot code
+roborio/                              complete RobotPy (Python) robot project
+  robot.py                            entry point
+  robotcontainer.py                   creates subsystems, binds buttons
+  pyproject.toml                      RobotPy version and packages
   subsystems/lidar_subsystem.py
+  subsystems/example_drivetrain.py    placeholder: replace with your drivetrain
   commands/drive_to_wall_distance.py
   commands/square_to_wall.py
   commands/lidar_intake_assist.py     PhotonVision + lidar handoff
-  tests/                              simulated-robot tests
+  tests/pyfrc_test.py                 RobotPy's standard startup tests
+roborio_tests/                        logic tests with a simulated robot (run without RobotPy)
 ```
 
 ## Hardware
@@ -183,57 +188,38 @@ Everything is under `/lidar`. Distances in meters, angles in degrees.
 
 ## Robot code
 
-Written for RobotPy 2026 (Python) with commands2 and photonlibpy. Copy the `subsystems` and `commands` folders from `roborio/` into your robot project, next to `robot.py`. In `pyproject.toml`, make sure the commands2 and PhotonVision packages are installed on the robot:
+The `roborio` folder is a complete RobotPy 2026 project (Python, commands2, photonlibpy) that deploys as-is. It uses a placeholder drivetrain that doesn't move any motors: it shows the speeds the commands request on the SmartDashboard (`Drive/RequestedVx`, `Drive/RequestedOmega`). That lets you bench-test the whole lidar pipeline on a real roboRIO before touching your drive code.
+
+**Deploy it** (from the `roborio` folder, with RobotPy 2026 installed on your laptop):
+
+```bash
+robotpy sync      # once, with internet: downloads RobotPy, commands2, photonlibpy
+robotpy deploy    # connected to the robot
+```
+
+`robotpy deploy` first runs the tests in `roborio/tests` (RobotPy's standard tests, which start the robot in the simulator and run every mode) and won't deploy if they fail.
+
+**Buttons** (Xbox controller, port 0):
+
+- **A** (press): square up to the wall ahead, then drive to 50 mm from it
+- **B** (hold): drive to a game piece, camera far away, lidar up close
+
+**Use your real drivetrain:** in `robotcontainer.py`, replace `ExampleDrivetrain()` with your drivetrain subsystem. It needs two methods:
+
+- `driveRobotRelative(speeds)`: takes `ChassisSpeeds` (forward, left, turn), robot-relative. Swerve drivetrains usually have this already. For tank, convert with `DifferentialDriveKinematics.toWheelSpeeds(speeds)`.
+- `getPose()`: returns the robot's field `Pose2d`.
+
+Or copy `subsystems/lidar_subsystem.py` and the `commands` folder into your existing robot project, and add the bindings from `robotcontainer.py`. Your `pyproject.toml` needs:
 
 ```toml
 [tool.robotpy]
-robotpy_extras = ["commands2"]
-requires = ["photonlibpy"]
+components = ["commands2"]
+requires = ["photonlibpy==2026.3.4"]
 ```
 
-The commands take a robot-relative drive function instead of a specific drivetrain class, so they work with swerve, tank, or mecanum. In `robotcontainer.py`:
+Keep photonlibpy at the same version as PhotonVision on the Orange Pi (shown in its web dashboard), or it warns at startup.
 
-```python
-from photonlibpy import PhotonCamera
-from wpimath.geometry import Rotation2d, Transform2d, Translation2d
-
-from commands.drive_to_wall_distance import DriveToWallDistance
-from commands.lidar_intake_assist import LidarIntakeAssist
-from commands.square_to_wall import SquareToWall
-from subsystems.lidar_subsystem import LidarSubsystem
-
-
-class RobotContainer:
-    def __init__(self):
-        self.drivetrain = ...  # your drivetrain subsystem
-        self.lidar = LidarSubsystem(self.drivetrain.getPose)
-
-        # Robot-relative drive. For swerve this is usually drivetrain.driveRobotRelative(speeds).
-        # For tank, convert with DifferentialDriveKinematics.toWheelSpeeds(speeds).
-        self.drive = self.drivetrain.driveRobotRelative
-
-        self.intake_camera = PhotonCamera("intake")
-        # Camera 0.30 m forward of robot center, on the centerline, facing forward
-        self.robot_to_intake_camera = Transform2d(Translation2d(0.30, 0.0), Rotation2d(0))
-
-        self.configureButtonBindings()
-
-    def configureButtonBindings(self):
-        # Square up, then drive to 50 mm from the wall
-        self.controller.a().onTrue(
-            SquareToWall(self.lidar, self.drivetrain, self.drive).andThen(
-                DriveToWallDistance(self.lidar, self.drivetrain, self.drive, 0.05)
-            )
-        )
-
-        # Drive to a game piece: camera far away, lidar up close
-        self.controller.b().whileTrue(
-            LidarIntakeAssist(
-                self.lidar, self.intake_camera, self.robot_to_intake_camera,
-                self.drivetrain, self.drive, 0.10,
-            )
-        )
-```
+Settings at the top of `robotcontainer.py`: the PhotonVision camera name, where the intake camera is mounted, the wall gap, and the intake stopping distance.
 
 `LidarSubsystem` methods. Anything that can be missing returns `None`:
 
@@ -256,12 +242,16 @@ The tuning constants (speeds and gains) at the top of each command file are star
 
 ### Robot code tests
 
-```bash
-cd roborio
-python3 -m unittest discover tests -v
-```
+Two sets of tests:
 
-These run on any computer, without RobotPy installed. `tests/fakes` holds small stand-ins for wpilib, ntcore, commands2 and wpimath that use the same names as RobotPy 2026. The tests simulate a robot driving each command to completion: squaring up from either side, driving to a wall distance (forward and backward), stopping when the lidar is lost, and the full intake approach where the camera loses the piece near the bumper and the lidar finishes the job. They check the logic, not RobotPy itself, so still test on the real robot.
+- **`roborio/tests`**: RobotPy's standard tests. Run `robotpy test` in the `roborio` folder (needs RobotPy installed). They start the robot in the simulator and run disabled, autonomous, and teleop to catch crashes.
+- **`roborio_tests`**: lidar logic tests that run on any computer, without RobotPy:
+  ```bash
+  python3 -m unittest discover roborio_tests -v
+  ```
+  `roborio_tests/fakes` holds small stand-ins for wpilib, ntcore, commands2, wpimath and photonlibpy that use the same names as RobotPy 2026. The tests simulate a robot driving each command to completion: squaring up from either side, driving to a wall distance (forward and backward), stopping when the lidar is lost, and the full intake approach where the camera loses the piece near the bumper and the lidar finishes the job. They also build the robot from `robot.py` and check the button bindings. They live outside `roborio` so their stand-ins never conflict with the real RobotPy during `robotpy deploy`.
+
+These check the logic, not your drivetrain. Still test on the real robot, on blocks or at low speed first.
 
 ## Combining with PhotonVision
 
